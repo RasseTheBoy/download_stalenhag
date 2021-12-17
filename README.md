@@ -8,13 +8,6 @@ Downloads all images from [simontålenhag.se](https://www.simonstalenhag.se/) to
 
 - [@RasseTheBoy](https://github.com/RasseTheBoy)
 
-
-## Installation guide
-
-pip:
-```bash
-  pip3 install download_stalenhag
-```
 ## Needed libraries
 
 [bs4](https://pypi.org/project/beautifulsoup4/)
