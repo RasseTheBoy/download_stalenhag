@@ -1,96 +1,99 @@
-import config_file, requests
-from selenium import webdriver
-from bs4 import BeautifulSoup as BS
-from tqdm import tqdm
-from os import listdir, mkdir, path
+import requests, threading
+
+from py_basic_commands  import create_file_dir, func_timer, join_path, get_dir_path_for_file, fprint
+from selectolax.parser  import HTMLParser
 
 
-def get_driver():
-    options = webdriver.ChromeOptions()
-    options.add_argument('user-agent={0}'.format('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.50 Safari/537.36'))
-    options.add_argument('log-level=3')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--no-default-browser-check')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--disable-extensions')
-    options.add_argument('--disable-default-apps')
-    options.add_argument("--headless")
-    options.add_experimental_option('useAutomationExtension', False)
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('excludeSwitches', ['enable-logging'])
-    return webdriver.Chrome(options=options, executable_path=config_file.CHROMEDRIVER_PATH)
+def get_html_from_url(url):
+    resp = requests.get(url)
+    if resp.status_code != 200:
+        raise ValueError('Website error!')
 
-driver = get_driver(); print()
+    html = HTMLParser(resp.text)
+    
+    return html
+
+def threaded(fn):
+    def wrapper(*args, **kwargs):
+        thread = threading.Thread(target=fn, args=args, kwargs=kwargs)
+        thread.start()
+        return thread
+    return wrapper
 
 
 class Section:
-    def __init__(self, name, url):
-        self.name = ' '.join(name.split())
-        self.url = 'https://www.simonstalenhag.se/' + url
-        self.img_url_dict = {}
+    def __init__(self, root, name:str, url_suffix:str) -> None:
+        self.section_name = name.strip()
+        self.url_fill = root.website_homepage + '{}'
+        self.section_url = self.url_fill.format(url_suffix)
+        self.section_dir = join_path(root.main_dir_path, self.section_name)
+        self.section_file_path_fill = join_path(self.section_dir, '{}')
 
-    def add_img_url(self, img_url):
-        img_nam = img_url.replace('/', '_').replace('.jpg', '')
-        self.img_url_dict[img_nam] = 'https://www.simonstalenhag.se/' + img_url
+    @threaded
+    def get_section_images(self):
+        html = get_html_from_url(self.section_url)
+        self.href_lst = [x.attributes['href'] for x in html.css('[target=_blank]') if 'big' in x.attributes['href']]
 
-    def print_all(self):
-        print(f'Name: {self.name}')
-        print(f'Url: {self.url}')
-        print('Images:')
-        for key, value in self.img_url_dict.items():
-            print(f'{key}: {value}')
-        print()
+    def download_section_images(self):
+        @threaded
+        def download_image(href):
+            img_file_path = self.section_file_path_fill.format(get_dir_path_for_file(href, 'fnam'))
+            img_url = self.url_fill.format(href)
 
+            reqs = requests.get(img_url)
 
-def get_html_source(driver):
-    html_source = driver.page_source
-    soup = BS(html_source, 'html.parser')
-    return soup
+            if reqs.status_code != 200:
+                return
 
-def get_sections():
-    driver.get('https://www.simonstalenhag.se/index.html')
-    soup = get_html_source(driver)
-    return [[Section(y.text, y['href']) for y in x.findAll('a')] for x in soup.find_all("span", {"class": "style2"})][0]
+            with open(img_file_path, 'wb') as handler:
+                handler.write(reqs.content)
 
-def get_images_from_section(section):
-    driver.get(section.url)
-    soup = get_html_source(driver)
-    [section.add_img_url(s['href']) for s in soup.find_all("a", {"target": "_blank"}) if 'big' in s['href']]
+        if not self.href_lst:
+            return
 
-def download_images(section):
-    dir = config_file.SAVE_DIR
-    folders_in_dir = listdir(dir)
-    save_dir = path.join(dir, section.name)
-    try:
-        mkdir(save_dir)
-    except:
-        pass
+        create_file_dir('d', self.section_dir)
 
-    pbar = tqdm(section.img_url_dict.items(), desc='Downloading images')
-    for img_nam, img_url in pbar:
-        pbar.set_postfix_str(img_nam)
-        img_data = requests.get(img_url).content
-        with open(path.join(save_dir, section.name + '_' + img_nam + '.png'), 'wb') as handler:
-            handler.write(img_data)
-
-def main():
-    try:
-        section_lst = get_sections()
-        pbar = tqdm(section_lst, desc='Getting section data')
-        for section in pbar:
-            pbar.set_postfix_str(section.name)
-            get_images_from_section(section)
-
-        pbar = tqdm(section_lst, desc='Downloading section images')
-        for section in pbar:
-            pbar.set_postfix_str(section.name)
-            download_images(section)
-    except Exceptions as e_msg:
-        print(e_msg)
-    finally:
-        driver.quit()
+        fprint(f'Downloading: {self.section_name}')
+        download_thr_lst = [download_image(href) for href in self.href_lst]
+        [thr.join() for thr in download_thr_lst]
 
 
+class StalenhagDownloader:
+    """
+    The StalenhagDownloader class is used to download all images from the website simonstalenhag.se.
+    This class uses the 'requests' library to make HTTP GET requests to the website and 'selectolax' library to parse the HTML content of the website.
+    It uses threading to make request and download concurrently for faster downloading time.
+    It takes an optional argument 'main_dir_path' which represents the path where the downloaded images will be stored.
 
-if __name__ == '__main__':
-    main()
+    Args:
+    - `main_dir_path` (str, optional): path where the downloaded images will be stored. Defaults to 'Stalenhag collection'.
+
+    Methods:
+    - `start()`: Initiates the download process.
+
+    """
+    website_homepage = 'https://www.simonstalenhag.se/'
+
+    def __init__(self, main_dir_path:str='Stalenhag collection'):
+        if not main_dir_path:
+            main_dir_path = 'Stalenhag collection'
+
+        self.main_dir_path = main_dir_path
+
+    @func_timer()
+    def start(self):
+        create_file_dir('d', self.main_dir_path)
+
+        html = get_html_from_url(self.website_homepage)
+        obj_lst = [Section(self, x.text(), x.attributes['href']) for x in html.css('span.style2 a')]
+
+        obj_thr_lst = [x.get_section_images() for x in obj_lst]
+        [x.join() for x in obj_thr_lst]
+
+        [x.download_section_images() for x in obj_lst]
+
+        print('Code complete!')
+
+
+if __name__ == '__main__': 
+    StalenhagDownloader().start()
