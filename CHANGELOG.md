@@ -1,6 +1,15 @@
 Changelog
 =========
 
+## [3.0.0] - 2024-2-5
+
+## Full rework of the project
+
+- New `main.py` file
+    - Version 3
+    - Uses both threading and asyncio
+        - A thread for each "Section" and asyncio for each image
+
 ## [2.0.0] - 2023-1-10
 
 ## Added
