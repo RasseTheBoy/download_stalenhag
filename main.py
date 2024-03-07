@@ -99,6 +99,9 @@ class Section:
             """Download an image from the section.
             
             Parameters
+
+
+            
             ----------
             img_url : str
                 The image url.
